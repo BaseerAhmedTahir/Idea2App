@@ -19,7 +19,8 @@ import {
   ChevronRight,
   ChevronDown,
   Edit3,
-  Save
+  Save,
+  AlertCircle
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -39,8 +40,9 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   const [editableContent, setEditableContent] = useState<{[key: string]: string}>({});
   const [isEditing, setIsEditing] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
-  const [previewLogs, setPreviewLogs] = useState<string[]>([]);
+  const [consoleLogs, setConsoleLogs] = useState<Array<{id: string, message: string, type: 'log' | 'error' | 'warn', timestamp: Date}>>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const tabs = [
@@ -68,6 +70,34 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       });
     }
   }, [code]);
+
+  // Listen for messages from iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'console') {
+        addConsoleLog(event.data.message, event.data.level);
+      } else if (event.data.type === 'ready') {
+        addConsoleLog('App loaded successfully', 'log');
+        setPreviewError(null);
+      } else if (event.data.type === 'error') {
+        addConsoleLog(`Error: ${event.data.message}`, 'error');
+        setPreviewError(event.data.message);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  const addConsoleLog = (message: string, type: 'log' | 'error' | 'warn' = 'log') => {
+    const logEntry = {
+      id: Date.now().toString(),
+      message,
+      type,
+      timestamp: new Date()
+    };
+    setConsoleLogs(prev => [...prev.slice(-50), logEntry]); // Keep last 50 logs
+  };
 
   const codeFiles = [
     {
@@ -103,22 +133,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       content: editableContent.package || ''
     },
     {
-      id: 'tests',
-      name: 'App.test.tsx',
-      path: 'src/App.test.tsx',
-      icon: <FileText className="h-4 w-4 text-red-500" />,
-      language: 'typescript',
-      content: editableContent.tests || ''
-    },
-    {
-      id: 'deployment',
-      name: 'Dockerfile',
-      path: 'Dockerfile',
-      icon: <FileText className="h-4 w-4 text-gray-500" />,
-      language: 'dockerfile',
-      content: editableContent.deployment || ''
-    },
-    {
       id: 'readme',
       name: 'README.md',
       path: 'README.md',
@@ -134,42 +148,13 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       type: 'folder',
       children: [
         { name: 'App.tsx', type: 'file', id: 'frontend' },
-        { name: 'App.test.tsx', type: 'file', id: 'tests' },
         { name: 'index.tsx', type: 'file' },
-        { name: 'index.css', type: 'file' },
-        {
-          name: 'components',
-          type: 'folder',
-          children: [
-            { name: 'Header.tsx', type: 'file' },
-            { name: 'AuthModal.tsx', type: 'file' },
-            { name: 'ChatInterface.tsx', type: 'file' },
-            { name: 'PreviewPanel.tsx', type: 'file' }
-          ]
-        },
-        {
-          name: 'services',
-          type: 'folder',
-          children: [
-            { name: 'ai.ts', type: 'file' },
-            { name: 'preview.ts', type: 'file' },
-            { name: 'deployment.ts', type: 'file' }
-          ]
-        },
-        {
-          name: 'hooks',
-          type: 'folder',
-          children: [
-            { name: 'useAuth.tsx', type: 'file' },
-            { name: 'useProjects.ts', type: 'file' }
-          ]
-        }
+        { name: 'index.css', type: 'file' }
       ]
     },
     { name: 'server.js', type: 'file', id: 'backend' },
     { name: 'package.json', type: 'file', id: 'package' },
     { name: 'README.md', type: 'file', id: 'readme' },
-    { name: 'Dockerfile', type: 'file', id: 'deployment' },
     {
       name: 'database',
       type: 'folder',
@@ -221,7 +206,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
 
   const saveChanges = () => {
     setIsEditing(false);
-    console.log('Saved changes:', editableContent);
+    setPreviewKey(prev => prev + 1); // Refresh preview with new code
+    addConsoleLog('Code changes saved and preview updated', 'log');
   };
 
   const downloadCode = async () => {
@@ -264,30 +250,23 @@ export default defineConfig({
 
       const content = await zip.generateAsync({ type: 'blob' });
       saveAs(content, 'generated-app.zip');
+      addConsoleLog('Code downloaded successfully', 'log');
     } catch (error) {
       console.error('Failed to download code:', error);
+      addConsoleLog('Failed to download code', 'error');
     }
   };
 
   const refreshPreview = async () => {
     setIsRefreshing(true);
-    setPreviewLogs(['Refreshing preview...']);
+    addConsoleLog('Refreshing preview...', 'log');
     setPreviewKey(prev => prev + 1);
+    setPreviewError(null);
     
-    if (iframeRef.current && preview?.url) {
-      const newUrl = preview.url + '?t=' + Date.now();
-      iframeRef.current.src = newUrl;
-      setPreviewLogs(prev => [...prev, 'Reloading iframe...', 'Preview refreshed']);
-    }
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsRefreshing(false);
-  };
-
-  const openInNewTab = () => {
-    if (preview?.url) {
-      window.open(preview.url, '_blank', 'noopener,noreferrer');
-    }
+    setTimeout(() => {
+      setIsRefreshing(false);
+      addConsoleLog('Preview refreshed', 'log');
+    }, 1000);
   };
 
   const renderFileTree = (items: any[], level = 0) => {
@@ -332,6 +311,41 @@ export default defineConfig({
   };
 
   const createPreviewHTML = (reactCode: string): string => {
+    // Always return valid HTML, even if no code
+    if (!reactCode || reactCode.trim() === '') {
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>No Code Generated</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="text-center max-w-md mx-auto p-8">
+    <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+      </svg>
+    </div>
+    <h1 class="text-xl font-bold text-gray-900 mb-2">No Code Generated Yet</h1>
+    <p class="text-gray-600 mb-4">Start a conversation with the AI to generate your app and see a live preview here.</p>
+    <div class="bg-white border border-gray-200 rounded-lg p-4 text-left">
+      <p class="text-sm text-gray-700 mb-2">Try saying:</p>
+      <ul class="text-sm text-gray-600 space-y-1">
+        <li>• "Create a todo app"</li>
+        <li>• "Build a calculator"</li>
+        <li>• "Make a weather app"</li>
+      </ul>
+    </div>
+  </div>
+  <script>
+    window.parent.postMessage({ type: 'ready' }, '*');
+  </script>
+</body>
+</html>`;
+    }
+
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -347,63 +361,186 @@ export default defineConfig({
       margin: 0; 
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
     }
+    .error-boundary {
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin: 1rem;
+      color: #991b1b;
+    }
+    .loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #f9fafb;
+    }
   </style>
 </head>
 <body>
+  <div id="loading" class="loading">
+    <div style="text-align: center;">
+      <div style="border: 3px solid #f3f4f6; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 12px;"></div>
+      <span style="color: #666;">Compiling React App...</span>
+    </div>
+  </div>
   <div id="root"></div>
+  
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
   
   <script type="text/babel">
     const { useState, useEffect } = React;
     
+    // Console override to capture logs
+    const originalConsole = window.console;
+    window.console = {
+      ...originalConsole,
+      log: (...args) => {
+        originalConsole.log(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'log',
+          message: args.join(' ')
+        }, '*');
+      },
+      error: (...args) => {
+        originalConsole.error(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'error',
+          message: args.join(' ')
+        }, '*');
+      },
+      warn: (...args) => {
+        originalConsole.warn(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'warn',
+          message: args.join(' ')
+        }, '*');
+      }
+    };
+
+    // Error boundary component
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      
+      componentDidCatch(error, errorInfo) {
+        console.error('React Error:', error.message);
+        window.parent.postMessage({
+          type: 'error',
+          message: error.message
+        }, '*');
+      }
+      
+      render() {
+        if (this.state.hasError) {
+          return React.createElement('div', {
+            className: 'error-boundary'
+          }, [
+            React.createElement('h3', { key: 'title' }, 'Component Error'),
+            React.createElement('p', { key: 'message' }, this.state.error?.message || 'Unknown error'),
+            React.createElement('pre', { 
+              key: 'stack',
+              style: { 
+                background: '#f3f4f6', 
+                padding: '1rem', 
+                borderRadius: '0.25rem', 
+                overflow: 'auto', 
+                fontSize: '0.875rem',
+                marginTop: '1rem'
+              }
+            }, this.state.error?.stack || 'No stack trace available'),
+            React.createElement('button', {
+              key: 'reload',
+              onClick: () => window.location.reload(),
+              style: { 
+                background: '#dc2626', 
+                color: 'white', 
+                padding: '8px 16px', 
+                border: 'none', 
+                borderRadius: '4px', 
+                marginTop: '8px',
+                cursor: 'pointer'
+              }
+            }, 'Reload Preview')
+          ]);
+        }
+        
+        return this.props.children;
+      }
+    }
+    
+    function hideLoading() {
+      const loading = document.getElementById('loading');
+      if (loading) loading.style.display = 'none';
+    }
+    
     try {
+      console.log('Starting React app compilation...');
+      
+      // Execute the React component code
       ${reactCode}
       
+      console.log('React component code executed successfully');
+      
+      // Check if App component exists
+      if (typeof App === 'undefined') {
+        throw new Error('App component not found. Make sure to export a default App component.');
+      }
+      
+      console.log('Rendering React app...');
+      
+      // Render the app
       const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(React.createElement(App));
+      root.render(
+        React.createElement(ErrorBoundary, null, 
+          React.createElement(App)
+        )
+      );
+      
+      hideLoading();
+      console.log('React app rendered successfully');
+      
+      window.parent.postMessage({ type: 'ready' }, '*');
       
     } catch (error) {
+      hideLoading();
+      console.error('Failed to render app:', error.message);
+      
       document.getElementById('root').innerHTML = \`
-        <div style="padding: 20px; background: #fee2e2; border: 1px solid #fecaca; border-radius: 8px; margin: 20px; color: #991b1b;">
-          <h3>Error</h3>
+        <div class="error-boundary">
+          <h3>Compilation Error</h3>
           <p>\${error.message}</p>
+          <pre style="background: #f3f4f6; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; font-size: 0.875rem; margin-top: 1rem;">\${error.stack || 'No stack trace available'}</pre>
+          <button onclick="window.location.reload()" style="background: #dc2626; color: white; padding: 8px 16px; border: none; border-radius: 4px; margin-top: 8px; cursor: pointer;">
+            Reload Preview
+          </button>
         </div>
       \`;
+      
+      window.parent.postMessage({
+        type: 'error',
+        message: error.message
+      }, '*');
     }
   </script>
 </body>
 </html>`;
   };
-
-  const EmptyState = ({ type }: { type: 'preview' | 'code' }) => (
-    <div className="flex-1 flex items-center justify-center bg-gray-50">
-      <div className="text-center max-w-md mx-auto p-8">
-        <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-          {type === 'preview' ? (
-            <Eye className="h-8 w-8 text-gray-400" />
-          ) : (
-            <Code2 className="h-8 w-8 text-gray-400" />
-          )}
-        </div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          {type === 'preview' ? 'No Preview Available' : 'No Code Generated'}
-        </h3>
-        <p className="text-gray-600 mb-6">
-          {type === 'preview' 
-            ? 'Start a conversation with the AI to generate your app and see a live preview here.'
-            : 'Describe your app idea to the AI assistant and the generated code will appear here.'
-          }
-        </p>
-        <div className="bg-white border border-gray-200 rounded-lg p-4 text-left">
-          <p className="text-sm text-gray-700 mb-2">Try saying:</p>
-          <ul className="text-sm text-gray-600 space-y-1">
-            <li>• "Create a todo app with user authentication"</li>
-            <li>• "Build a blog platform with comments"</li>
-            <li>• "Make an e-commerce store"</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div className={`flex flex-col h-full bg-white ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}>
@@ -422,8 +559,11 @@ export default defineConfig({
               >
                 {tab.icon}
                 <span>{tab.name}</span>
-                {((tab.id === 'preview' && preview) || (tab.id === 'code' && code)) && (
+                {tab.id === 'preview' && (
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                )}
+                {tab.id === 'code' && code && (
+                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
                 )}
               </button>
             ))}
@@ -465,16 +605,6 @@ export default defineConfig({
                 >
                   <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                 </button>
-                
-                {preview && (
-                  <button 
-                    onClick={openInNewTab}
-                    className="p-2 text-gray-600 hover:text-gray-900 transition-colors" 
-                    title="Open in New Tab"
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                  </button>
-                )}
               </>
             )}
             
@@ -485,7 +615,7 @@ export default defineConfig({
                   className={`flex items-center space-x-1 px-3 py-2 rounded-lg text-sm transition-colors ${
                     isEditing ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                   }`}
-                  title={isEditing ? 'Exit Edit Mode' : 'Edit Code'}
+                  title={isEditing ? 'Save Changes' : 'Edit Code'}
                 >
                   {isEditing ? <Save className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}
                   <span>{isEditing ? 'Save' : 'Edit'}</span>
@@ -506,40 +636,68 @@ export default defineConfig({
       </div>
 
       {activeTab === 'preview' ? (
-        code ? (
-          <div className="flex-1 flex overflow-hidden">
-            <div className="flex-1 p-4 bg-gray-50 flex items-center justify-center overflow-auto">
-              <div className={`${getFrameClass()} border border-gray-300 rounded-lg overflow-hidden bg-white shadow-lg transition-all duration-300`}>
-                <div className="h-8 bg-gray-100 flex items-center justify-between px-4 border-b border-gray-200">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  </div>
-                  <div className="flex-1 mx-4">
-                    <div className="bg-white rounded px-3 py-1 text-xs text-gray-500 font-mono text-center max-w-48 truncate">
-                      localhost:3000
-                    </div>
-                  </div>
-                  <div className="w-16"></div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 p-4 bg-gray-50 flex items-center justify-center overflow-auto">
+            <div className={`${getFrameClass()} border border-gray-300 rounded-lg overflow-hidden bg-white shadow-lg transition-all duration-300`}>
+              <div className="h-8 bg-gray-100 flex items-center justify-between px-4 border-b border-gray-200">
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                 </div>
-                
-                <div className="h-full bg-white">
-                  <iframe
-                    key={previewKey}
-                    ref={iframeRef}
-                    srcDoc={createPreviewHTML(typeof code === 'string' ? code : code.frontend || '')}
-                    className="w-full h-full border-0"
-                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
-                    title="App Preview"
-                  />
+                <div className="flex-1 mx-4">
+                  <div className="bg-white rounded px-3 py-1 text-xs text-gray-500 font-mono text-center max-w-48 truncate">
+                    localhost:3000
+                  </div>
                 </div>
+                <div className="w-16"></div>
+              </div>
+              
+              <div className="h-full bg-white">
+                <iframe
+                  key={previewKey}
+                  ref={iframeRef}
+                  srcDoc={createPreviewHTML(editableContent.frontend || '')}
+                  className="w-full h-full border-0"
+                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
+                  title="App Preview"
+                />
               </div>
             </div>
           </div>
-        ) : (
-          <EmptyState type="preview" />
-        )
+          
+          {/* Console Output */}
+          <div className="border-t border-gray-200 bg-gray-900 text-green-400 font-mono text-xs h-32 overflow-y-auto">
+            <div className="bg-gray-800 px-3 py-1 border-b border-gray-700 flex items-center justify-between">
+              <span className="text-gray-300">Console Output</span>
+              <button
+                onClick={() => setConsoleLogs([])}
+                className="text-gray-400 hover:text-gray-200 text-xs"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="p-3 space-y-1">
+              {consoleLogs.map((log) => (
+                <div key={log.id} className="flex items-start space-x-2">
+                  <span className="text-gray-500 text-xs min-w-[60px]">
+                    {log.timestamp.toLocaleTimeString()}
+                  </span>
+                  <span className={
+                    log.type === 'error' ? 'text-red-400' : 
+                    log.type === 'warn' ? 'text-yellow-400' : 
+                    'text-green-400'
+                  }>
+                    {log.message}
+                  </span>
+                </div>
+              ))}
+              {consoleLogs.length === 0 && (
+                <div className="text-gray-500">Console output will appear here...</div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : (
         code ? (
           <div className="flex-1 flex overflow-hidden">
@@ -632,7 +790,25 @@ export default defineConfig({
             </div>
           </div>
         ) : (
-          <EmptyState type="code" />
+          <div className="flex-1 flex items-center justify-center bg-gray-50">
+            <div className="text-center max-w-md mx-auto p-8">
+              <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Code2 className="h-8 w-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">No Code Generated</h3>
+              <p className="text-gray-600 mb-6">
+                Describe your app idea to the AI assistant and the generated code will appear here.
+              </p>
+              <div className="bg-white border border-gray-200 rounded-lg p-4 text-left">
+                <p className="text-sm text-gray-700 mb-2">Try saying:</p>
+                <ul className="text-sm text-gray-600 space-y-1">
+                  <li>• "Create a todo app with user authentication"</li>
+                  <li>• "Build a blog platform with comments"</li>
+                  <li>• "Make an e-commerce store"</li>
+                </ul>
+              </div>
+            </div>
+          </div>
         )
       )}
     </div>
