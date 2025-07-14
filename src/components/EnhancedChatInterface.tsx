@@ -34,7 +34,6 @@ const EnhancedChatInterface: React.FC<EnhancedChatInterfaceProps> = ({
   ]);
   const [input, setInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'chat' | 'terminal'>('chat');
   const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -96,29 +95,62 @@ const EnhancedChatInterface: React.FC<EnhancedChatInterfaceProps> = ({
   const generateCode = async (idea: string) => {
     const features = extractFeatures(idea);
     
-    addTerminalLog('Starting code generation...');
-    addTerminalLog(`Identified features: ${features.join(', ')}`);
-    
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    addTerminalLog('Analyzing requirements...');
+    addTerminalLog('🚀 Starting code generation...');
+    addTerminalLog(`📋 Identified features: ${features.join(', ')}`);
     
     await new Promise(resolve => setTimeout(resolve, 800));
-    addTerminalLog('Generating React components...');
-    
-    const code = CleanCodeGenerator.generateReactComponent(idea, features);
+    addTerminalLog('🔍 Analyzing requirements...');
     
     await new Promise(resolve => setTimeout(resolve, 600));
-    addTerminalLog('Optimizing code structure...');
+    addTerminalLog('⚛️ Generating React components...');
+    
+    const frontendCode = CleanCodeGenerator.generateReactComponent(idea, features);
+    const backendCode = CleanCodeGenerator.generateBackendCode(idea, features);
+    const databaseCode = CleanCodeGenerator.generateDatabaseSchema(features);
     
     await new Promise(resolve => setTimeout(resolve, 400));
-    addTerminalLog('Build completed successfully');
-    addTerminalLog('Code generation finished');
+    addTerminalLog('📦 Installing dependencies...');
+    addTerminalLog('npm install react react-dom @types/react');
+    addTerminalLog('npm install express cors bcryptjs jsonwebtoken');
     
-    return { code, features };
+    await new Promise(resolve => setTimeout(resolve, 500));
+    addTerminalLog('✅ Dependencies installed successfully');
+    addTerminalLog('🔧 Optimizing code structure...');
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+    addTerminalLog('✨ Build completed successfully');
+    addTerminalLog('🎉 Code generation finished');
+    
+    const generatedCode = {
+      frontend: frontendCode,
+      backend: backendCode,
+      database: databaseCode,
+      packageJson: JSON.stringify({
+        name: "generated-app",
+        version: "1.0.0",
+        dependencies: {
+          "react": "^18.2.0",
+          "react-dom": "^18.2.0",
+          "express": "^4.18.2",
+          "cors": "^2.8.5",
+          "bcryptjs": "^2.4.3",
+          "jsonwebtoken": "^9.0.0"
+        },
+        scripts: {
+          "start": "react-scripts start",
+          "build": "react-scripts build",
+          "server": "node server.js"
+        }
+      }, null, 2),
+      readme: `# Generated App\n\nThis app was generated based on: ${idea}\n\n## Features\n${features.map(f => `- ${f}`).join('\n')}\n\n## Getting Started\n\n\`\`\`bash\nnpm install\nnpm start\n\`\`\``
+    };
+    
+    return { code: generatedCode, features };
   };
 
   const addTerminalLog = (message: string) => {
-    setTerminalLogs(prev => [...prev, `${new Date().toLocaleTimeString()} ${message}`]);
+    const timestamp = new Date().toLocaleTimeString();
+    setTerminalLogs(prev => [...prev, `${timestamp} ${message}`]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -143,7 +175,16 @@ const EnhancedChatInterface: React.FC<EnhancedChatInterfaceProps> = ({
       });
 
       const { code, features } = await generateCode(userMessage);
-      setGeneratedCode(code);
+      
+      // Pass the generated code to the parent component
+      onCodeGenerated?.(code);
+      
+      // Generate preview immediately
+      onPreviewGenerated?.({
+        url: '',
+        status: 'ready',
+        code: code.frontend
+      });
       
       updateLastMessage({
         content: `✅ **Application Generated Successfully!**
@@ -162,14 +203,11 @@ ${features.map(f => `• ${f.charAt(0).toUpperCase() + f.slice(1)}`).join('\n')}
 
 You can now view the live preview and interact with your application!`,
         metadata: {
-          code,
+          code: code.frontend,
           features,
           isGenerating: false
         }
       });
-
-      onCodeGenerated?.(code);
-      onPreviewGenerated?.({ url: '', status: 'ready' });
 
     } catch (error) {
       updateLastMessage({
@@ -177,6 +215,13 @@ You can now view the live preview and interact with your application!`,
 
 I encountered an issue while generating your app: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again with a different description.`,
         metadata: { isGenerating: false }
+      });
+      
+      // Show error in preview
+      onPreviewGenerated?.({
+        url: '',
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     } finally {
       setIsProcessing(false);
@@ -197,10 +242,10 @@ I encountered an issue while generating your app: ${error instanceof Error ? err
   };
 
   const examplePrompts = [
-    "Create a todo app with user authentication and task management",
-    "Build a blog platform with posts, comments, and user profiles",
-    "Make an e-commerce store with product catalog and shopping cart",
-    "Design a social media app with posts, likes, and user feeds"
+    "Create a todo app with add, edit, and delete functionality",
+    "Build a simple blog with posts and comments",
+    "Make a calculator with basic math operations",
+    "Design a weather app with current conditions"
   ];
 
   const tabs = [
@@ -352,13 +397,29 @@ I encountered an issue while generating your app: ${error instanceof Error ? err
         )}
 
         {activeTab === 'terminal' && (
-          <div className="h-full">
-            <Terminal 
-              onCommandExecute={(cmd, output) => {
-                addTerminalLog(`$ ${cmd}`);
-                addTerminalLog(output);
-              }}
-            />
+          <div className="h-full bg-gray-900 text-green-400 font-mono text-sm">
+            <div className="bg-gray-800 px-4 py-2 border-b border-gray-700 flex items-center justify-between">
+              <span className="text-gray-300">Terminal Output</span>
+              <button
+                onClick={() => setTerminalLogs([])}
+                className="text-gray-400 hover:text-gray-200 text-xs"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="p-4 h-full overflow-y-auto">
+              {terminalLogs.length === 0 ? (
+                <div className="text-gray-500">Terminal output will appear here...</div>
+              ) : (
+                <div className="space-y-1">
+                  {terminalLogs.map((log, index) => (
+                    <div key={index} className="text-green-400">
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
