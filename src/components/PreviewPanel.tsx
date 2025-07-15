@@ -34,8 +34,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   const [activeTab, setActiveTab] = useState<'preview' | 'code'>('preview');
   const [viewMode, setViewMode] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeCodeTab, setActiveCodeTab] = useState('frontend');
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['src', 'components']));
+  const [activeCodeTab, setActiveCodeTab] = useState('src/App.js');
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['src', 'public']));
   const [copied, setCopied] = useState<string | null>(null);
   const [editableContent, setEditableContent] = useState<{[key: string]: string}>({});
   const [isEditing, setIsEditing] = useState(false);
@@ -56,28 +56,18 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
     { id: 'mobile', name: 'Mobile', icon: <Smartphone className="h-4 w-4" /> }
   ];
 
-  // Initialize editable content when code changes
   useEffect(() => {
     if (code) {
-      setEditableContent({
-        frontend: typeof code === 'string' ? code : code.frontend || '',
-        backend: code.backend || '',
-        database: code.database || '',
-        package: code.packageJson || '',
-        tests: code.tests || '',
-        deployment: code.deployment || '',
-        readme: code.readme || ''
-      });
+      setEditableContent(code);
     }
   }, [code]);
 
-  // Listen for messages from iframe
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data.type === 'console') {
         addConsoleLog(event.data.message, event.data.level);
       } else if (event.data.type === 'ready') {
-        addConsoleLog('App loaded successfully', 'log');
+        addConsoleLog('React app loaded successfully', 'log');
         setPreviewError(null);
       } else if (event.data.type === 'error') {
         addConsoleLog(`Error: ${event.data.message}`, 'error');
@@ -96,72 +86,56 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       type,
       timestamp: new Date()
     };
-    setConsoleLogs(prev => [...prev.slice(-50), logEntry]); // Keep last 50 logs
+    setConsoleLogs(prev => [...prev.slice(-50), logEntry]);
   };
 
-  const codeFiles = [
-    {
-      id: 'frontend',
-      name: 'App.tsx',
-      path: 'src/App.tsx',
-      icon: <FileText className="h-4 w-4 text-blue-500" />,
-      language: 'typescript',
-      content: editableContent.frontend || ''
-    },
-    {
-      id: 'backend',
-      name: 'server.js',
-      path: 'server.js',
-      icon: <Server className="h-4 w-4 text-green-500" />,
-      language: 'javascript',
-      content: editableContent.backend || ''
-    },
-    {
-      id: 'database',
-      name: 'schema.sql',
-      path: 'database/schema.sql',
-      icon: <Database className="h-4 w-4 text-purple-500" />,
-      language: 'sql',
-      content: editableContent.database || ''
-    },
-    {
-      id: 'package',
-      name: 'package.json',
-      path: 'package.json',
-      icon: <FileText className="h-4 w-4 text-orange-500" />,
-      language: 'json',
-      content: editableContent.package || ''
-    },
-    {
-      id: 'readme',
-      name: 'README.md',
-      path: 'README.md',
-      icon: <FileText className="h-4 w-4 text-blue-400" />,
-      language: 'markdown',
-      content: editableContent.readme || ''
-    }
-  ];
+  const codeFiles = code ? Object.keys(code).map(filePath => {
+    const fileName = filePath.split('/').pop() || filePath;
+    const isJs = filePath.endsWith('.js') || filePath.endsWith('.jsx');
+    const isJson = filePath.endsWith('.json');
+    const isHtml = filePath.endsWith('.html');
+    const isCss = filePath.endsWith('.css');
+    const isMd = filePath.endsWith('.md');
+    
+    return {
+      id: filePath,
+      name: fileName,
+      path: filePath,
+      icon: isJs ? <Code2 className="h-4 w-4 text-yellow-500" /> :
+            isJson ? <FileText className="h-4 w-4 text-orange-500" /> :
+            isHtml ? <FileText className="h-4 w-4 text-red-500" /> :
+            isCss ? <FileText className="h-4 w-4 text-blue-500" /> :
+            isMd ? <FileText className="h-4 w-4 text-gray-500" /> :
+            <FileText className="h-4 w-4 text-gray-400" />,
+      language: isJs ? 'javascript' : isJson ? 'json' : isHtml ? 'html' : isCss ? 'css' : isMd ? 'markdown' : 'text',
+      content: code[filePath] || ''
+    };
+  }) : [];
 
   const fileTree = [
     {
       name: 'src',
       type: 'folder',
-      children: [
-        { name: 'App.tsx', type: 'file', id: 'frontend' },
-        { name: 'index.tsx', type: 'file' },
-        { name: 'index.css', type: 'file' }
-      ]
+      children: codeFiles.filter(f => f.path.startsWith('src/')).map(f => ({
+        name: f.name,
+        type: 'file',
+        id: f.id
+      }))
     },
-    { name: 'server.js', type: 'file', id: 'backend' },
-    { name: 'package.json', type: 'file', id: 'package' },
-    { name: 'README.md', type: 'file', id: 'readme' },
     {
-      name: 'database',
+      name: 'public',
       type: 'folder',
-      children: [
-        { name: 'schema.sql', type: 'file', id: 'database' }
-      ]
-    }
+      children: codeFiles.filter(f => f.path.startsWith('public/')).map(f => ({
+        name: f.name,
+        type: 'file',
+        id: f.id
+      }))
+    },
+    ...codeFiles.filter(f => !f.path.includes('/')).map(f => ({
+      name: f.name,
+      type: 'file',
+      id: f.id
+    }))
   ];
 
   const getFrameClass = () => {
@@ -206,7 +180,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
 
   const saveChanges = () => {
     setIsEditing(false);
-    setPreviewKey(prev => prev + 1); // Refresh preview with new code
+    setPreviewKey(prev => prev + 1);
     addConsoleLog('Code changes saved and preview updated', 'log');
   };
 
@@ -216,40 +190,12 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
     try {
       const zip = new JSZip();
 
-      codeFiles.forEach(file => {
-        if (file.content) {
-          zip.file(file.path, file.content);
-        }
+      Object.keys(code).forEach(filePath => {
+        zip.file(filePath, code[filePath]);
       });
 
-      zip.file('.env.example', `DATABASE_URL=postgresql://username:password@localhost:5432/dbname
-JWT_SECRET=your-super-secret-jwt-key
-OPENAI_API_KEY=your-openai-api-key
-NODE_ENV=development
-PORT=3001`);
-
-      zip.file('vite.config.ts', `import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 3000,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true
-      }
-    }
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true
-  }
-});`);
-
       const content = await zip.generateAsync({ type: 'blob' });
-      saveAs(content, 'generated-app.zip');
+      saveAs(content, 'react-app.zip');
       addConsoleLog('Code downloaded successfully', 'log');
     } catch (error) {
       console.error('Failed to download code:', error);
@@ -310,8 +256,8 @@ export default defineConfig({
     ));
   };
 
-  const createPreviewHTML = (reactCode: string): string => {
-    if (!reactCode || reactCode.trim() === '') {
+  const createPreviewHTML = (appCode: string): string => {
+    if (!appCode || appCode.trim() === '') {
       return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -328,7 +274,7 @@ export default defineConfig({
       </svg>
     </div>
     <h1 class="text-xl font-bold text-gray-900 mb-2">No Code Generated Yet</h1>
-    <p class="text-gray-600 mb-4">Start a conversation with the AI to generate your app and see a live preview here.</p>
+    <p class="text-gray-600 mb-4">Start a conversation with the AI to generate your React app and see a live preview here.</p>
     <div class="bg-white border border-gray-200 rounded-lg p-4 text-left">
       <p class="text-sm text-gray-700 mb-2">Try saying:</p>
       <ul class="text-sm text-gray-600 space-y-1">
@@ -351,7 +297,7 @@ export default defineConfig({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>React Preview</title>
+  <title>React App Preview</title>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -467,13 +413,18 @@ export default defineConfig({
     try {
       console.log('Starting React app compilation...');
       
+      // Clean the code - remove import statements for browser execution
+      let cleanCode = \`${appCode.replace(/import.*?from.*?;/g, '').replace(/export default/g, 'window.App =')}\`;
+      
+      console.log('Executing React component code...');
+      
       // Execute the React component code
-      ${reactCode}
+      eval(cleanCode);
       
       console.log('React component code executed successfully');
       
       // Check if App component exists
-      if (typeof App === 'undefined') {
+      if (typeof window.App === 'undefined') {
         throw new Error('App component not found. Make sure to export a default App component.');
       }
       
@@ -483,7 +434,7 @@ export default defineConfig({
       const root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(
         React.createElement(ErrorBoundary, null, 
-          React.createElement(App)
+          React.createElement(window.App)
         )
       );
       
@@ -630,16 +581,15 @@ export default defineConfig({
                 <iframe
                   key={previewKey}
                   ref={iframeRef}
-                  srcDoc={createPreviewHTML(editableContent.frontend || '')}
+                  srcDoc={createPreviewHTML(editableContent['src/App.js'] || '')}
                   className="w-full h-full border-0"
                   sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
-                  title="App Preview"
+                  title="React App Preview"
                 />
               </div>
             </div>
           </div>
           
-          {/* Console Output */}
           <div className="border-t border-gray-200 bg-gray-900 text-green-400 font-mono text-xs h-32 overflow-y-auto">
             <div className="bg-gray-800 px-3 py-1 border-b border-gray-700 flex items-center justify-between">
               <span className="text-gray-300">Console Output</span>
