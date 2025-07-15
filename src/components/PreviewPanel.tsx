@@ -311,7 +311,6 @@ export default defineConfig({
   };
 
   const createPreviewHTML = (reactCode: string): string => {
-    // Always return valid HTML, even if no code
     if (!reactCode || reactCode.trim() === '') {
       return `<!DOCTYPE html>
 <html lang="en">
@@ -340,6 +339,7 @@ export default defineConfig({
     </div>
   </div>
   <script>
+    console.log('Preview ready - no code to display');
     window.parent.postMessage({ type: 'ready' }, '*');
   </script>
 </body>
@@ -369,33 +369,13 @@ export default defineConfig({
       margin: 1rem;
       color: #991b1b;
     }
-    .loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      background: #f9fafb;
-    }
   </style>
 </head>
 <body>
-  <div id="loading" class="loading">
-    <div style="text-align: center;">
-      <div style="border: 3px solid #f3f4f6; border-top: 3px solid #3b82f6; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 12px;"></div>
-      <span style="color: #666;">Compiling React App...</span>
-    </div>
-  </div>
   <div id="root"></div>
   
-  <style>
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-  </style>
-  
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, createContext, useContext } = React;
     
     // Console override to capture logs
     const originalConsole = window.console;
@@ -484,11 +464,6 @@ export default defineConfig({
       }
     }
     
-    function hideLoading() {
-      const loading = document.getElementById('loading');
-      if (loading) loading.style.display = 'none';
-    }
-    
     try {
       console.log('Starting React app compilation...');
       
@@ -512,13 +487,11 @@ export default defineConfig({
         )
       );
       
-      hideLoading();
       console.log('React app rendered successfully');
       
       window.parent.postMessage({ type: 'ready' }, '*');
       
     } catch (error) {
-      hideLoading();
       console.error('Failed to render app:', error.message);
       
       document.getElementById('root').innerHTML = \`
