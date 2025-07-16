@@ -50,8 +50,9 @@ export class PreviewService {
       const validatedCode = this.validateGeneratedCode(generatedCode);
       console.log('✅ Code validation passed');
       
-      // Extract and clean the React code
-      const cleanCode = this.extractAndCleanReactCode(validatedCode.frontend || '');
+      // Extract and clean the React code from App.js
+      const appCode = validatedCode['src/App.js'] || validatedCode.frontend || '';
+      const cleanCode = this.extractAndCleanReactCode(appCode);
       console.log('🧹 Code cleaned and extracted');
       
       if (!cleanCode) {
@@ -108,10 +109,14 @@ export class PreviewService {
 
   private static validateGeneratedCode(generatedCode: unknown): GeneratedCode {
     try {
-      return GeneratedCodeSchema.parse(generatedCode);
+      // Handle both old format (frontend/backend) and new format (file paths)
+      if (typeof generatedCode === 'object' && generatedCode !== null) {
+        return generatedCode;
+      }
+      return {};
     } catch (error) {
       console.warn('⚠️ Invalid generated code format, using fallback');
-      return { frontend: '' };
+      return {};
     }
   }
 
@@ -146,10 +151,16 @@ export class PreviewService {
       }
     }
     
+    // Remove any import statements (we'll add React import in the HTML)
+    cleanContent = cleanContent.replace(/import\s+.*?from\s+['"][^'"]+['"];?\s*/g, '');
+    
+    // Remove export statements
+    cleanContent = cleanContent.replace(/export\s+default\s+\w+;?\s*/g, '');
+    
     // Validate if it's a React component
     if (this.isValidReactComponent(cleanContent)) {
       console.log('✅ Valid React component detected');
-      return this.ensureProperImports(cleanContent);
+      return cleanContent.trim();
     }
     
     console.log('❌ No valid React component found');
@@ -158,26 +169,33 @@ export class PreviewService {
 
   private static isValidReactComponent(code: string): boolean {
     // Check for React component patterns
-    const hasReactImport = code.includes('import React') || code.includes('from \'react\'') || code.includes('from "react"');
-    const hasComponent = code.includes('function App') || code.includes('const App') || code.includes('export default');
+    const hasComponent = code.includes('function App') || code.includes('const App');
     const hasJSX = code.includes('<') && code.includes('>') && (code.includes('div') || code.includes('span') || code.includes('button'));
     
-    return (hasReactImport || hasComponent) && hasJSX;
+    return hasComponent && hasJSX;
   }
 
-  private static ensureProperImports(code: string): string {
-    // Ensure React is imported
-    if (!code.includes('import React')) {
-      code = `import React, { useState, useEffect } from 'react';\n\n${code}`;
+  private static cleanReactCodeForBrowser = (reactCode: string): string => {
+    if (!reactCode) return '';
+
+    let cleanCode = reactCode;
+
+    // Remove all import statements
+    cleanCode = cleanCode.replace(/import\s+.*?from\s+['"][^'"]+['"];?\s*/g, '');
+    cleanCode = cleanCode.replace(/import\s+['"][^'"]+['"];?\s*/g, '');
+
+    // Remove export statements
+    cleanCode = cleanCode.replace(/export\s+default\s+/g, '');
+    cleanCode = cleanCode.replace(/export\s+\{[^}]*\}\s*;?\s*/g, '');
+
+    // Ensure React hooks are available at the top
+    const needsHooks = cleanCode.includes('useState') || cleanCode.includes('useEffect') || cleanCode.includes('useContext') || cleanCode.includes('useCallback') || cleanCode.includes('useMemo');
+    if (needsHooks) {
+      cleanCode = `const { useState, useEffect, useContext, useCallback, useMemo, createContext } = React;\n\n${cleanCode}`;
     }
-    
-    // Ensure component is exported
-    if (!code.includes('export default')) {
-      code = `${code}\n\nexport default App;`;
-    }
-    
-    return code;
-  }
+
+    return cleanCode.trim();
+  };
 
   private static extractDependencies(code: string): string[] {
     const importRegex = /import.*?from\s+['"`]([^'"`]+)['"`]/g;
@@ -202,9 +220,7 @@ export class PreviewService {
   }
 
   private static generateDemoApp(): string {
-    return `import React, { useState } from 'react';
-
-function App() {
+    return `function App() {
   const [count, setCount] = useState(0);
   const [todos, setTodos] = useState([
     { id: 1, text: 'Learn React', completed: false },
@@ -311,9 +327,7 @@ function App() {
       </div>
     </div>
   );
-}
-
-export default App;`;
+}`;
   }
 
   private static createLivePreview(reactCode: string): string {
@@ -469,7 +483,9 @@ export default App;`;
       const root = ReactDOM.createRoot(document.getElementById('root'));
       root.render(
         React.createElement(ErrorBoundary, null, 
-          React.createElement(App)
+          React.createElement(typeof App !== 'undefined' ? App : (() => React.createElement('div', { 
+            style: { padding: '20px', textAlign: 'center', color: 'red' } 
+          }, 'App component not found or failed to load')))
         )
       );
       
