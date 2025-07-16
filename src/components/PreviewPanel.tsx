@@ -93,13 +93,21 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   };
 
   const generatePreview = () => {
-    if (!code || !code['src/App.js']) {
+    if (!code) {
       console.log('No code available for preview');
       return;
     }
 
     try {
-      const appCode = code['src/App.js'];
+      // Try different possible locations for the React code
+      const appCode = code['src/App.js'] || code['App.js'] || code.frontend || '';
+      
+      if (!appCode) {
+        console.log('No React app code found');
+        setPreviewError('No React app code found');
+        return;
+      }
+      
       const previewHtml = createPreviewHTML(appCode);
       
       // Create blob URL for the preview
@@ -375,16 +383,27 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
     cleanCode = cleanCode.replace(/export\s+default\s+/g, '');
     cleanCode = cleanCode.replace(/export\s+\{[^}]*\}\s*;?\s*/g, '');
 
-    // Ensure React hooks are available
-    if (cleanCode.includes('useState') || cleanCode.includes('useEffect')) {
-      cleanCode = `const { useState, useEffect } = React;\n\n${cleanCode}`;
+    // Ensure React hooks are available at the top
+    const needsHooks = cleanCode.includes('useState') || cleanCode.includes('useEffect') || cleanCode.includes('useContext') || cleanCode.includes('useCallback') || cleanCode.includes('useMemo');
+    if (needsHooks) {
+      cleanCode = `const { useState, useEffect, useContext, useCallback, useMemo, createContext } = React;\n\n${cleanCode}`;
     }
 
-    // Make sure the component is available globally
-    if (cleanCode.includes('function App')) {
-      cleanCode = cleanCode.replace('function App', 'window.App = function App');
-    } else if (cleanCode.includes('const App')) {
-      cleanCode = cleanCode.replace('const App', 'window.App');
+    // Ensure the App function is properly defined
+    if (!cleanCode.includes('function App') && !cleanCode.includes('const App')) {
+      // If no App component found, create a simple one
+      cleanCode = `function App() {
+  return (
+    <div className="min-h-screen bg-gray-100 p-8">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-3xl font-bold text-gray-900 mb-8">Generated App</h1>
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-gray-600">Your app content will appear here.</p>
+        </div>
+      </div>
+    </div>
+  );
+}`;
     }
 
     return cleanCode.trim();
