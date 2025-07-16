@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Eye, 
   Code2, 
@@ -43,6 +43,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   const [consoleLogs, setConsoleLogs] = useState<Array<{id: string, message: string, type: 'log' | 'error' | 'warn', timestamp: Date}>>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string>('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const tabs = [
@@ -59,6 +60,8 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   useEffect(() => {
     if (code) {
       setEditableContent(code);
+      // Generate preview when code is available
+      generatePreview();
     }
   }, [code]);
 
@@ -87,6 +90,304 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       timestamp: new Date()
     };
     setConsoleLogs(prev => [...prev.slice(-50), logEntry]);
+  };
+
+  const generatePreview = () => {
+    if (!code || !code['src/App.js']) {
+      console.log('No code available for preview');
+      return;
+    }
+
+    try {
+      const appCode = code['src/App.js'];
+      const previewHtml = createPreviewHTML(appCode);
+      
+      // Create blob URL for the preview
+      const blob = new Blob([previewHtml], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      
+      // Clean up previous URL
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      
+      setPreviewUrl(url);
+      setPreviewError(null);
+      addConsoleLog('Preview generated successfully', 'log');
+    } catch (error) {
+      console.error('Preview generation failed:', error);
+      setPreviewError(error instanceof Error ? error.message : 'Preview generation failed');
+      addConsoleLog(`Preview generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  };
+
+  const createPreviewHTML = (appCode: string): string => {
+    if (!appCode || appCode.trim() === '') {
+      return createNoCodeHTML();
+    }
+
+    // Clean the React code for browser execution
+    const cleanCode = cleanReactCodeForBrowser(appCode);
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React App Preview</title>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { 
+      margin: 0; 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    }
+    .error-boundary {
+      background: #fee2e2;
+      border: 1px solid #fecaca;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      margin: 1rem;
+      color: #991b1b;
+    }
+    .spinner {
+      border: 3px solid #f3f4f6;
+      border-top: 3px solid #3b82f6;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin-right: 12px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" style="display: flex; justify-content: center; align-items: center; height: 100vh; background: #f9fafb; font-size: 18px; color: #666;">
+    <div class="spinner"></div>
+    <span>Loading React App...</span>
+  </div>
+  <div id="root"></div>
+  <div id="error-display" class="error-boundary" style="display: none;">
+    <h3>Preview Error</h3>
+    <p id="error-message"></p>
+    <button onclick="location.reload()" style="background: #3b82f6; color: white; padding: 8px 16px; border: none; border-radius: 4px; margin-top: 8px; cursor: pointer;">
+      Reload Preview
+    </button>
+  </div>
+  
+  <script type="text/babel">
+    console.log('🚀 Starting React app...');
+    
+    const { useState, useEffect, createContext, useContext } = React;
+    
+    // Global error handlers
+    window.addEventListener('error', (event) => {
+      console.error('❌ Global error:', event.error);
+      showError(event.error?.message || 'Unknown error occurred');
+    });
+    
+    window.addEventListener('unhandledrejection', (event) => {
+      console.error('❌ Unhandled promise rejection:', event.reason);
+      showError(event.reason?.message || 'Promise rejection occurred');
+    });
+    
+    function showError(message) {
+      const loading = document.getElementById('loading');
+      const errorDisplay = document.getElementById('error-display');
+      const errorMessage = document.getElementById('error-message');
+      
+      if (loading) loading.style.display = 'none';
+      if (errorDisplay && errorMessage) {
+        errorMessage.textContent = message;
+        errorDisplay.style.display = 'block';
+      }
+      
+      window.parent.postMessage({
+        type: 'error',
+        message: message
+      }, '*');
+    }
+    
+    function hideLoading() {
+      const loading = document.getElementById('loading');
+      if (loading) loading.style.display = 'none';
+    }
+    
+    // Console override to capture logs
+    const originalConsole = window.console;
+    window.console = {
+      ...originalConsole,
+      log: (...args) => {
+        originalConsole.log(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'log',
+          message: args.join(' ')
+        }, '*');
+      },
+      error: (...args) => {
+        originalConsole.error(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'error',
+          message: args.join(' ')
+        }, '*');
+      },
+      warn: (...args) => {
+        originalConsole.warn(...args);
+        window.parent.postMessage({
+          type: 'console',
+          level: 'warn',
+          message: args.join(' ')
+        }, '*');
+      }
+    };
+    
+    // Error Boundary Component
+    class ErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      
+      static getDerivedStateFromError(error) {
+        console.error('🚨 Error boundary caught error:', error);
+        return { hasError: true, error };
+      }
+      
+      componentDidCatch(error, errorInfo) {
+        console.error('🚨 Component error:', error, errorInfo);
+        showError(error.message);
+      }
+      
+      render() {
+        if (this.state.hasError) {
+          return React.createElement('div', {
+            className: 'error-boundary',
+            style: { margin: '20px' }
+          }, [
+            React.createElement('h3', { key: 'title' }, 'Component Error'),
+            React.createElement('p', { key: 'message' }, this.state.error?.message || 'Unknown error'),
+            React.createElement('button', {
+              key: 'reload',
+              onClick: () => location.reload(),
+              style: { 
+                background: '#3b82f6', 
+                color: 'white', 
+                padding: '8px 16px', 
+                border: 'none', 
+                borderRadius: '4px', 
+                marginTop: '8px',
+                cursor: 'pointer'
+              }
+            }, 'Reload Preview')
+          ]);
+        }
+        
+        return this.props.children;
+      }
+    }
+    
+    try {
+      console.log('📦 Executing React component code...');
+      
+      // Execute the generated React code
+      ${cleanCode}
+      
+      console.log('✅ Component code executed successfully');
+      console.log('🎨 Rendering app...');
+      
+      // Create root and render
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(
+        React.createElement(ErrorBoundary, null, 
+          React.createElement(App || (() => React.createElement('div', { 
+            style: { padding: '20px', textAlign: 'center' } 
+          }, 'App component not found')))
+        )
+      );
+      
+      console.log('🎉 App rendered successfully!');
+      hideLoading();
+      
+      window.parent.postMessage({ type: 'ready' }, '*');
+      
+    } catch (error) {
+      console.error('💥 Error executing code:', error);
+      showError('Code execution error: ' + error.message);
+    }
+  </script>
+</body>
+</html>`;
+  };
+
+  const createNoCodeHTML = (): string => {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>No Code Generated</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="text-center max-w-md mx-auto p-8">
+    <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+      </svg>
+    </div>
+    <h1 class="text-xl font-bold text-gray-900 mb-2">No Code Generated Yet</h1>
+    <p class="text-gray-600 mb-4">Start a conversation with the AI to generate your React app and see a live preview here.</p>
+    <div class="bg-white border border-gray-200 rounded-lg p-4 text-left">
+      <p class="text-sm text-gray-700 mb-2">Try saying:</p>
+      <ul class="text-sm text-gray-600 space-y-1">
+        <li>• "Create a todo app"</li>
+        <li>• "Build a calculator"</li>
+        <li>• "Make a weather app"</li>
+      </ul>
+    </div>
+  </div>
+  <script>
+    console.log('Preview ready - no code to display');
+    window.parent.postMessage({ type: 'ready' }, '*');
+  </script>
+</body>
+</html>`;
+  };
+
+  const cleanReactCodeForBrowser = (reactCode: string): string => {
+    if (!reactCode) return '';
+
+    let cleanCode = reactCode;
+
+    // Remove all import statements
+    cleanCode = cleanCode.replace(/import\s+.*?from\s+['"][^'"]+['"];?\s*/g, '');
+    cleanCode = cleanCode.replace(/import\s+['"][^'"]+['"];?\s*/g, '');
+
+    // Remove export statements
+    cleanCode = cleanCode.replace(/export\s+default\s+/g, '');
+    cleanCode = cleanCode.replace(/export\s+\{[^}]*\}\s*;?\s*/g, '');
+
+    // Ensure React hooks are available
+    if (cleanCode.includes('useState') || cleanCode.includes('useEffect')) {
+      cleanCode = `const { useState, useEffect } = React;\n\n${cleanCode}`;
+    }
+
+    // Make sure the component is available globally
+    if (cleanCode.includes('function App')) {
+      cleanCode = cleanCode.replace('function App', 'window.App = function App');
+    } else if (cleanCode.includes('const App')) {
+      cleanCode = cleanCode.replace('const App', 'window.App');
+    }
+
+    return cleanCode.trim();
   };
 
   const codeFiles = code ? Object.keys(code).map(filePath => {
@@ -181,6 +482,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
   const saveChanges = () => {
     setIsEditing(false);
     setPreviewKey(prev => prev + 1);
+    generatePreview(); // Regenerate preview with updated code
     addConsoleLog('Code changes saved and preview updated', 'log');
   };
 
@@ -210,6 +512,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
     setPreviewError(null);
     
     setTimeout(() => {
+      generatePreview();
       setIsRefreshing(false);
       addConsoleLog('Preview refreshed', 'log');
     }, 1000);
@@ -256,216 +559,6 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
     ));
   };
 
-  const createPreviewHTML = (appCode: string): string => {
-    if (!appCode || appCode.trim() === '') {
-      return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>No Code Generated</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen flex items-center justify-center">
-  <div class="text-center max-w-md mx-auto p-8">
-    <div class="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="h-8 w-8 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-      </svg>
-    </div>
-    <h1 class="text-xl font-bold text-gray-900 mb-2">No Code Generated Yet</h1>
-    <p class="text-gray-600 mb-4">Start a conversation with the AI to generate your React app and see a live preview here.</p>
-    <div class="bg-white border border-gray-200 rounded-lg p-4 text-left">
-      <p class="text-sm text-gray-700 mb-2">Try saying:</p>
-      <ul class="text-sm text-gray-600 space-y-1">
-        <li>• "Create a todo app"</li>
-        <li>• "Build a calculator"</li>
-        <li>• "Make a weather app"</li>
-      </ul>
-    </div>
-  </div>
-  <script>
-    console.log('Preview ready - no code to display');
-    window.parent.postMessage({ type: 'ready' }, '*');
-  </script>
-</body>
-</html>`;
-    }
-
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>React App Preview</title>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    body { 
-      margin: 0; 
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-    }
-    .error-boundary {
-      background: #fee2e2;
-      border: 1px solid #fecaca;
-      border-radius: 0.5rem;
-      padding: 1rem;
-      margin: 1rem;
-      color: #991b1b;
-    }
-  </style>
-</head>
-<body>
-  <div id="root"></div>
-  
-  <script type="text/babel">
-    const { useState, useEffect, createContext, useContext } = React;
-    
-    // Console override to capture logs
-    const originalConsole = window.console;
-    window.console = {
-      ...originalConsole,
-      log: (...args) => {
-        originalConsole.log(...args);
-        window.parent.postMessage({
-          type: 'console',
-          level: 'log',
-          message: args.join(' ')
-        }, '*');
-      },
-      error: (...args) => {
-        originalConsole.error(...args);
-        window.parent.postMessage({
-          type: 'console',
-          level: 'error',
-          message: args.join(' ')
-        }, '*');
-      },
-      warn: (...args) => {
-        originalConsole.warn(...args);
-        window.parent.postMessage({
-          type: 'console',
-          level: 'warn',
-          message: args.join(' ')
-        }, '*');
-      }
-    };
-
-    // Error boundary component
-    class ErrorBoundary extends React.Component {
-      constructor(props) {
-        super(props);
-        this.state = { hasError: false, error: null };
-      }
-      
-      static getDerivedStateFromError(error) {
-        return { hasError: true, error };
-      }
-      
-      componentDidCatch(error, errorInfo) {
-        console.error('React Error:', error.message);
-        window.parent.postMessage({
-          type: 'error',
-          message: error.message
-        }, '*');
-      }
-      
-      render() {
-        if (this.state.hasError) {
-          return React.createElement('div', {
-            className: 'error-boundary'
-          }, [
-            React.createElement('h3', { key: 'title' }, 'Component Error'),
-            React.createElement('p', { key: 'message' }, this.state.error?.message || 'Unknown error'),
-            React.createElement('pre', { 
-              key: 'stack',
-              style: { 
-                background: '#f3f4f6', 
-                padding: '1rem', 
-                borderRadius: '0.25rem', 
-                overflow: 'auto', 
-                fontSize: '0.875rem',
-                marginTop: '1rem'
-              }
-            }, this.state.error?.stack || 'No stack trace available'),
-            React.createElement('button', {
-              key: 'reload',
-              onClick: () => window.location.reload(),
-              style: { 
-                background: '#dc2626', 
-                color: 'white', 
-                padding: '8px 16px', 
-                border: 'none', 
-                borderRadius: '4px', 
-                marginTop: '8px',
-                cursor: 'pointer'
-              }
-            }, 'Reload Preview')
-          ]);
-        }
-        
-        return this.props.children;
-      }
-    }
-    
-    try {
-      console.log('Starting React app compilation...');
-      
-      // Clean the code - remove import statements for browser execution
-      let cleanCode = \`${appCode.replace(/import.*?from.*?;/g, '').replace(/export default/g, 'window.App =')}\`;
-      
-      console.log('Executing React component code...');
-      
-      // Execute the React component code
-      eval(cleanCode);
-      
-      console.log('React component code executed successfully');
-      
-      // Check if App component exists
-      if (typeof window.App === 'undefined') {
-        throw new Error('App component not found. Make sure to export a default App component.');
-      }
-      
-      console.log('Rendering React app...');
-      
-      // Render the app
-      const root = ReactDOM.createRoot(document.getElementById('root'));
-      root.render(
-        React.createElement(ErrorBoundary, null, 
-          React.createElement(window.App)
-        )
-      );
-      
-      console.log('React app rendered successfully');
-      
-      window.parent.postMessage({ type: 'ready' }, '*');
-      
-    } catch (error) {
-      console.error('Failed to render app:', error.message);
-      
-      document.getElementById('root').innerHTML = \`
-        <div class="error-boundary">
-          <h3>Compilation Error</h3>
-          <p>\${error.message}</p>
-          <pre style="background: #f3f4f6; padding: 1rem; border-radius: 0.25rem; overflow-x: auto; font-size: 0.875rem; margin-top: 1rem;">\${error.stack || 'No stack trace available'}</pre>
-          <button onclick="window.location.reload()" style="background: #dc2626; color: white; padding: 8px 16px; border: none; border-radius: 4px; margin-top: 8px; cursor: pointer;">
-            Reload Preview
-          </button>
-        </div>
-      \`;
-      
-      window.parent.postMessage({
-        type: 'error',
-        message: error.message
-      }, '*');
-    }
-  </script>
-</body>
-</html>`;
-  };
-
   return (
     <div className={`flex flex-col h-full bg-white ${isFullscreen ? 'fixed inset-0 z-50' : ''}`}>
       <div className="border-b border-gray-200 p-4">
@@ -483,7 +576,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
               >
                 {tab.icon}
                 <span>{tab.name}</span>
-                {tab.id === 'preview' && (
+                {tab.id === 'preview' && previewUrl && (
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 )}
                 {tab.id === 'code' && code && (
@@ -562,32 +655,73 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
       {activeTab === 'preview' ? (
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 p-4 bg-gray-50 flex items-center justify-center overflow-auto">
-            <div className={`${getFrameClass()} border border-gray-300 rounded-lg overflow-hidden bg-white shadow-lg transition-all duration-300`}>
-              <div className="h-8 bg-gray-100 flex items-center justify-between px-4 border-b border-gray-200">
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                  <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+            {!code || !code['src/App.js'] ? (
+              <div className="text-center max-w-md mx-auto p-8">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Eye className="h-8 w-8 text-blue-500" />
                 </div>
-                <div className="flex-1 mx-4">
-                  <div className="bg-white rounded px-3 py-1 text-xs text-gray-500 font-mono text-center max-w-48 truncate">
-                    localhost:3000
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Preview Available</h3>
+                <p className="text-gray-600 mb-6">
+                  Generate code using the chat interface to see a live preview here.
+                </p>
+                <div className="bg-white border border-gray-200 rounded-lg p-4 text-left">
+                  <p className="text-sm text-gray-700 mb-2">Try saying:</p>
+                  <ul className="text-sm text-gray-600 space-y-1">
+                    <li>• "Create a todo app"</li>
+                    <li>• "Build a calculator"</li>
+                    <li>• "Make a weather app"</li>
+                  </ul>
+                </div>
+              </div>
+            ) : previewError ? (
+              <div className="text-center max-w-md mx-auto p-8">
+                <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Preview Error</h3>
+                <p className="text-gray-600 mb-4">{previewError}</p>
+                <button
+                  onClick={refreshPreview}
+                  className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  Retry Preview
+                </button>
+              </div>
+            ) : (
+              <div className={`${getFrameClass()} border border-gray-300 rounded-lg overflow-hidden bg-white shadow-lg transition-all duration-300`}>
+                <div className="h-8 bg-gray-100 flex items-center justify-between px-4 border-b border-gray-200">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                    <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                   </div>
+                  <div className="flex-1 mx-4">
+                    <div className="bg-white rounded px-3 py-1 text-xs text-gray-500 font-mono text-center max-w-48 truncate">
+                      localhost:3000
+                    </div>
+                  </div>
+                  <div className="w-16"></div>
                 </div>
-                <div className="w-16"></div>
+                
+                <div className="h-full bg-white">
+                  {previewUrl ? (
+                    <iframe
+                      key={previewKey}
+                      ref={iframeRef}
+                      src={previewUrl}
+                      className="w-full h-full border-0"
+                      sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
+                      title="React App Preview"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                        <p className="text-gray-600">Generating preview...</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              
-              <div className="h-full bg-white">
-                <iframe
-                  key={previewKey}
-                  ref={iframeRef}
-                  srcDoc={createPreviewHTML(editableContent['src/App.js'] || '')}
-                  className="w-full h-full border-0"
-                  sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-modals"
-                  title="React App Preview"
-                />
-              </div>
-            </div>
+            )}
           </div>
           
           <div className="border-t border-gray-200 bg-gray-900 text-green-400 font-mono text-xs h-32 overflow-y-auto">
@@ -692,7 +826,7 @@ const PreviewPanel: React.FC<PreviewPanelProps> = ({ code, preview }) => {
                       
                       {isEditing ? (
                         <textarea
-                          value={activeFile.content}
+                          value={editableContent[activeFile.id] || activeFile.content}
                           onChange={(e) => handleCodeChange(activeFile.id, e.target.value)}
                           className="flex-1 p-4 bg-gray-900 text-gray-300 font-mono text-sm resize-none border-0 outline-0 overflow-auto"
                           style={{ fontFamily: 'Monaco, Menlo, "Ubuntu Mono", monospace' }}
